@@ -111,7 +111,7 @@ map_fmt_ext = {
 
 args = parser.parse_args()
 
-if args.cmd == None:
+if args.cmd is None:
     parser.print_help()
     sys.exit(1)
 
@@ -124,21 +124,14 @@ def read_stdfile(path):
 #
 # Check if descriptor has mandatory fields
 def is_valid_desc(desc):
-    if desc == None:
+    if desc is None:
         return False
-    if 'description' not in desc:
-        return False
-    if desc['description'] == "":
-        return False
-    return True
+    return False if 'description' not in desc else desc['description'] != ""
 
 #
 # Expand ref/id in descriptors array
 def expand_templates(desc_array):
-    desc_ids = { }
-    for d in desc_array:
-        if 'id' in d:
-            desc_ids[d['id']] = d
+    desc_ids = {d['id']: d for d in desc_array if 'id' in d}
     for i, d in enumerate(desc_array):
         if 'ref' in d and d['ref'] in desc_ids:
             ref = desc_ids[d['ref']]
@@ -166,14 +159,13 @@ def prepare_desc(desc, basedir, name, path):
     #
     # Which code to expect when nasm finishes
     desc['_wait'] = 0
-    if 'error' in desc:
-        if desc['error'] == 'expected':
-            desc['_wait'] = 1
+    if 'error' in desc and desc['error'] == 'expected':
+        desc['_wait'] = 1
     #
     # Walk over targets and generate match templates
     # if were not provided yet
     for d in desc['target']:
-        if 'output' in d and not 'match' in d:
+        if 'output' in d and 'match' not in d:
             d['match'] = d['output'] + ".t"
     return True
 
@@ -220,7 +212,7 @@ def collect_test_desc_from_dir(basedir):
                 desc_array += collect_test_desc_from_dir(basedir + os.sep + filename)
             elif fnmatch.fnmatch(filename, '*.json'):
                 desc = read_desc(basedir, filename)
-                if desc == None:
+                if desc is None:
                     continue
                 desc_array += desc
         desc_array.sort(key=lambda x: x['_test-name'])
@@ -235,39 +227,37 @@ if args.cmd == 'list':
 
 def test_abort(test, message):
     print("\t%s: %s" % (test, message))
-    print("=== Test %s ABORT ===" % (test))
+    print(f"=== Test {test} ABORT ===")
     sys.exit(1)
     return False
 
 def test_fail(test, message):
     print("\t%s: %s" % (test, message))
-    print("=== Test %s FAIL ===" % (test))
+    print(f"=== Test {test} FAIL ===")
     return False
 
 def test_skip(test, message):
     print("\t%s: %s" % (test, message))
-    print("=== Test %s SKIP ===" % (test))
+    print(f"=== Test {test} SKIP ===")
     return True
 
 def test_over(test):
-    print("=== Test %s ERROR OVER ===" % (test))
+    print(f"=== Test {test} ERROR OVER ===")
     return True
 
 def test_pass(test):
-    print("=== Test %s PASS ===" % (test))
+    print(f"=== Test {test} PASS ===")
     return True
 
 def test_updated(test):
-    print("=== Test %s UPDATED ===" % (test))
+    print(f"=== Test {test} UPDATED ===")
     return True
 
 def run_hexdump(path):
     p = subprocess.Popen([args.hexdump, "-C", path],
                          stdout = subprocess.PIPE,
                          close_fds = True)
-    if p.wait() == 0:
-        return p
-    return None
+    return p if p.wait() == 0 else None
 
 def show_std(stdname, data):
     print("\t--- %s" % (stdname))
@@ -295,7 +285,7 @@ def cmp_std(from_name, from_data, match_name, match_data):
 def show_diff(test, patha, pathb):
     pa = run_hexdump(patha)
     pb = run_hexdump(pathb)
-    if pa == None or pb == None:
+    if pa is None or pb is None:
         return test_fail(test, "Can't create dumps")
     sa = pa.stdout.read().decode("utf-8")
     sb = pb.stdout.read().decode("utf-8")
@@ -328,9 +318,8 @@ def prepare_run_opts(desc):
                 opts += t['option'].split(" ") + [desc['_base-dir'] + os.sep + t['output']]
             else:
                 opts += ['-o', desc['_base-dir'] + os.sep + t['output']]
-        if 'stdout' in t or 'stderr' in t:
-            if 'option' in t:
-                opts += t['option'].split(" ")
+        if ('stdout' in t or 'stderr' in t) and 'option' in t:
+            opts += t['option'].split(" ")
     if 'source' in desc:
         opts += [desc['_base-dir'] + os.sep + desc['source']]
     return opts
@@ -342,22 +331,17 @@ def exec_nasm(desc):
     nasm_env = os.environ.copy()
     nasm_env['NASMENV'] = '--reproducible'
 
-    desc_env = desc.get('environ')
-    if desc_env:
+    if desc_env := desc.get('environ'):
         for i in desc_env:
             v = i.split('=')
-            if len(v) == 2:
-                nasm_env[v[0]] = v[1]
-            else:
-                nasm_env[v[0]] = None
-
+            nasm_env[v[0]] = v[1] if len(v) == 2 else None
     print("\tExecuting %s" % (" ".join(opts)))
     pnasm = subprocess.Popen(opts,
                              stdout = subprocess.PIPE,
                              stderr = subprocess.PIPE,
                              close_fds = True,
                              env = nasm_env)
-    if pnasm == None:
+    if pnasm is None:
         test_fail(desc['_test-name'], "Unable to execute test")
         return None
 
@@ -377,19 +361,18 @@ def exec_nasm(desc):
             show_std("stdout", stdout)
         if stderr != "":
             show_std("stderr", stderr)
-        test_fail(desc['_test-name'],
-                  "Unexpected ret code: " + str(wait_rc))
+        test_fail(desc['_test-name'], f"Unexpected ret code: {str(wait_rc)}")
         return None, None, None
     return pnasm, stdout, stderr
 
 def test_run(desc):
-    print("=== Running %s ===" % (desc['_test-name']))
+    print(f"=== Running {desc['_test-name']} ===")
 
     if 'disable' in desc:
         return test_skip(desc['_test-name'], desc["disable"])
 
     pnasm, stdout, stderr = exec_nasm(desc)
-    if pnasm == None:
+    if pnasm is None:
         return False
 
     for t in desc['target']:
@@ -401,13 +384,16 @@ def test_run(desc):
             print("\tComparing %s %s" % (output, match))
             if filecmp.cmp(match, output) == False:
                 show_diff(desc['_test-name'], match, output)
-                return test_fail(desc['_test-name'], match + " and " + output + " files are different")
+                return test_fail(
+                    desc['_test-name'],
+                    f"{match} and {output} files are different",
+                )
         elif 'stdout' in t:
             print("\tComparing stdout")
             match = desc['_base-dir'] + os.sep + t['stdout']
             match_data = read_stdfile(match)
-            if match_data == None:
-                return test_fail(test, "Can't read " + match)
+            if match_data is None:
+                return test_fail(test, f"Can't read {match}")
             if cmp_std(match, match_data, 'stdout', stdout) == False:
                 return test_fail(desc['_test-name'], "Stdout mismatch")
             else:
@@ -416,8 +402,8 @@ def test_run(desc):
             print("\tComparing stderr")
             match = desc['_base-dir'] + os.sep + t['stderr']
             match_data = read_stdfile(match)
-            if match_data == None:
-                return test_fail(test, "Can't read " + match)
+            if match_data is None:
+                return test_fail(test, f"Can't read {match}")
             if cmp_std(match, match_data, 'stderr', stderr) == False:
                 return test_fail(desc['_test-name'], "Stderr mismatch")
             else:
@@ -436,7 +422,7 @@ def test_run(desc):
 #
 # Compile sources and generate new targets
 def test_update(desc):
-    print("=== Updating %s ===" % (desc['_test-name']))
+    print(f"=== Updating {desc['_test-name']} ===")
 
     if 'update' in desc and desc['update'] == 'false':
         return test_skip(desc['_test-name'], "No output provided")
@@ -444,7 +430,7 @@ def test_update(desc):
         return test_skip(desc['_test-name'], desc["disable"])
 
     pnasm, stdout, stderr = exec_nasm(desc)
-    if pnasm == None:
+    if pnasm is None:
         return False
 
     for t in desc['target']:
@@ -475,7 +461,7 @@ if args.cmd == 'new':
     # If no source provided create one
     # from (ID which is required)
     if not args.source:
-        args.source = args.id + ".asm"
+        args.source = f"{args.id}.asm"
 
     #
     # Emulate "touch" on source file
@@ -493,34 +479,33 @@ if args.cmd == 'new':
         f.write("[\n\t{\n".encode("utf-8"))
         acc = []
         if args.description:
-            acc.append("\t\t\"description\": \"{}\"".format(args.description))
-        acc.append("\t\t\"id\": \"{}\"".format(args.id))
+            acc.append(f'\t\t\"description\": \"{args.description}\"')
+        acc.append(f'\t\t\"id\": \"{args.id}\"')
         if args.format:
-            acc.append("\t\t\"format\": \"{}\"".format(args.format))
-        acc.append("\t\t\"source\": \"{}\"".format(args.source))
+            acc.append(f'\t\t\"format\": \"{args.format}\"')
+        acc.append(f'\t\t\"source\": \"{args.source}\"')
         if args.option:
-            acc.append("\t\t\"option\": \"{}\"".format(args.option))
+            acc.append(f'\t\t\"option\": \"{args.option}\"')
         if args.ref:
-            acc.append("\t\t\"ref\": \"{}\"".format(args.ref))
-        if args.error == 'y':
-            acc.append("\t\t\"error\": \"expected\"")
-        elif args.error == 'i':
+            acc.append(f'\t\t\"ref\": \"{args.ref}\"')
+        if args.error == 'i':
             acc.append("\t\t\"error\": \"over\"")
+        elif args.error == 'y':
+            acc.append("\t\t\"error\": \"expected\"")
         f.write(",\n".join(acc).encode("utf-8"))
         if args.output or args.stdout or args.stderr:
             acc = []
             if args.output:
-                if args.output == 'y':
-                    if args.format in map_fmt_ext:
-                        args.output = args.id + map_fmt_ext[args.format]
+                if args.output == 'y' and args.format in map_fmt_ext:
+                    args.output = args.id + map_fmt_ext[args.format]
                 acc.append("\t\t\t{{ \"output\": \"{}\" }}".format(args.output))
             if args.stdout:
                 if args.stdout == 'y':
-                    args.stdout = args.id + '.stdout'
+                    args.stdout = f'{args.id}.stdout'
                 acc.append("\t\t\t{{ \"stdout\": \"{}\" }}".format(args.stdout))
             if args.stderr:
                 if args.stderr == 'y':
-                    args.stderr = args.id + '.stderr'
+                    args.stderr = f'{args.id}.stderr'
                 acc.append("\t\t\t{{ \"stderr\": \"{}\" }}".format(args.stderr))
             f.write(",\n".encode("utf-8"))
             f.write("\t\t\"target\": [\n".encode("utf-8"))
@@ -531,7 +516,7 @@ if args.cmd == 'new':
 
 if args.cmd == 'run':
     desc_array = []
-    if args.test == None:
+    if args.test is None:
         desc_array = collect_test_desc_from_dir(args.dir)
     else:
         desc_array = collect_test_desc_from_file(args.test)
@@ -547,7 +532,7 @@ if args.cmd == 'run':
 
 if args.cmd == 'update':
     desc_array = []
-    if args.test == None:
+    if args.test is None:
         desc_array = collect_test_desc_from_dir(args.dir)
     else:
         desc_array = collect_test_desc_from_file(args.test)
